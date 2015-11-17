@@ -13,6 +13,7 @@ s.startR = 'r'
 s.endH = '='
 s.endV = '#'
 s.null = '.'
+s.null2 = ','
 s.up = 0;
 s.right = 1;
 s.down = 2;
@@ -21,7 +22,8 @@ s.dirs = ["up","right","down","left"];
 s.udirs = ["↑","→","↓","←"];
 var showme = false;
 var prevt = 0;
-setInterval(function () { console.log(((solution.leafadds - prevt) / 10.0) + "route tests/second",solution.leafcount, solution.leafadds, solution.leafrems); prevt = solution.leafadds; }, 10000);
+var recentLeaf;
+setInterval(function () { console.log(((solution.leafadds - prevt) / 10.0) + "\troute tests/second",solution.leafcount, solution.leafadds, solution.leafrems, solution.endLeafs.length); prevt = solution.leafadds; }, 10000);
 
 // % tree
 // o blue platform
@@ -37,27 +39,39 @@ setInterval(function () { console.log(((solution.leafadds - prevt) / 10.0) + "ro
 
 var loadedLev = {};
 var solution = {};
-var yeildAmount = 500000;
-var yeildTime = 10;
+var yeildAmount = 800;
+var yeildTime = 20;
+var depthLimit = 160;
 
 var lev = ["...........%........",
   "....................",
   "....*.*.*..%..ooo...",
   "....................",
   "...........%........",
-  "---r...............=",
+  "---r..............,=",
   "...........%........",
   "....................",
   "....@.@.@..%..!!!...",
   "....................",
   "...........%........"]
-var lev2 = ["...=",
-  "-...",
-  "r-..",
-  "...."]
-
+var lev2 = ["..,=",
+            "....",
+            "r...",
+            "-..."]
+            
+var lev3 = ["...,=",
+            ".....",
+            "-r...",
+            "....."]
+            
+var lev4 = [
+            "......",
+            "....,=",
+            "......",
+            "-r....",
+            "......"]
 function Start() {
-  loadedLev = ParseLevel(lev);
+  loadedLev = ParseLevel(lev2);
   solution = {};
   solution.leafcount = 1;
   solution.leafadds = 1;
@@ -82,28 +96,29 @@ function Traverse(BaseLeaf) {
     if (!currentLeaf.scanned) {
       currentLeaf.Scan();
     }
-    if (currentLeaf.Done(true) && !currentLeaf.DeadEnd()) {
-      //   console.log("Done, moving up", currentLeaf.depth);
-      //Back up the tree we go
-      currentLeaf = currentLeaf.parent;
-      continue outer_loop;
-    }
-    if (currentLeaf.DeadEnd()) {
+    
+    if(currentLeaf.depth > depthLimit  || (!currentLeaf.golden && currentLeaf.DeadEnd() )){
       if (currentLeaf == solution.baseLeaf) {
         console.error(currentLeaf);
         return;
       }
-      //   console.log("Dead end, moving up", currentLeaf.depth);
+       // console.log("Dead end, moving up", currentLeaf.depth);
       //Back up the tree we go
       currentLeaf.Remove();
       currentLeaf = currentLeaf.parent;
       continue outer_loop;
     }
+    if(currentLeaf.Done()){
+     // console.log("Done, moving up", currentLeaf.depth,currentLeaf);
+      //move up
+      currentLeaf = currentLeaf.parent;
+      continue outer_loop;
+    }
     for (var i = 0; i < 4; i++) {
-      if (currentLeaf.directions[i] == true && !currentLeaf.children[i].Done(true)) {
+      if (currentLeaf.directions[i] == true && !currentLeaf.children[i].Done() ) {
         //console.log(i,currentLeaf.depth);
+        //console.log("moving Down", currentLeaf.depth,currentLeaf);
         currentLeaf = currentLeaf.children[i];
-        // console.log("moving Down", currentLeaf.depth);
         continue outer_loop;
       }
     }
@@ -129,10 +144,14 @@ class Leaf {
     this.golden = false;
     this.directions = [true, true, true, true];
     this.children = [null, null, null, null];
+    this.finalLeaf = false;
+    this.reallyDone = false;
     if (this.ReachesEnd()) {
-      console.log("found valid path", this);
+   //   console.log("found valid path", this);
       MakePathGolden(LeafPath(this));
+      this.finalLeaf = true;
       this.scanned = true;
+      this.reallyDone = true;
       this.directions = [false, false, false, false];
       solution.endLeafs.push(this);
       switch (this.direction) {
@@ -150,8 +169,16 @@ class Leaf {
           break;
       } 
     }
+    if (this.parent !== null) {
+      if (!CanIStillGetBack(this)) {
+      //  console.log(2222);
+       // this.directions = [false, false, false, false];
+      }
+    }
     if(showme){
       showme = false;
+      console.log(this);
+      recentLeaf = this;
       console.log(VisLeaf(this));
     }
   }
@@ -160,7 +187,7 @@ class Leaf {
     for (var i = 0; i < 4; i++) {
       if(!this.directions[i]){continue;}
       var newP = Move(this.position, i);
-      if (ValidPosition(newP, loadedLev.map, i, loadedLev.bounds) && !IntersectsWithTrack(newP, this)) {
+      if (ValidPosition(newP, loadedLev.map, i, loadedLev.bounds,this) && !IntersectsWithTrack(newP, this)) {
         this.directions[i] = true;
         if (!Exists(this.children[i])) {
           this.children[i] = new Leaf(this, i, newP, this.depth + 1);
@@ -192,18 +219,18 @@ class Leaf {
   DeadEnd() {
     return (this.scanned && !this.directions[0] && !this.directions[1] && !this.directions[2] && !this.directions[3]);
   }
-
-  Done(recurse) {
-    //All childeren are either done or nulled
-    if (!this.scanned) {
-      return false;
-    }
-    if (this.ReachesEnd()) {
-      return true;
-    }
+  
+  Done(){
+    //firstly, am I a finalLeaf, or have I been checked for Done before?
+    if(this.finalLeaf == true || this.reallyDone == true){return true;}
+    //Have I been scanned yet?
+    if(this.scanned == false){return false;}
+    //for each childeren
     for (var i = 0; i < 4; i++) {
-      if ((!recurse && this.directions[i] == true) || (recurse && this.directions[i] == true && !this.children[i].Done(false))) {
-        return false;
+      //are they still alive?
+      if(this.directions[i] == true){
+        //are they Done?
+        if(!this.children[i].Done()){return false;}
       }
     }
     return true;
@@ -218,8 +245,9 @@ function ValidPosition(p, map, dir, bounds) {
   if (!checkSanity(p,dir)){
     return false;
   }
+  
   var tile = map[p.x][p.y];
-  if (tile == s.null) {
+  if (tile == s.null || tile == s.null2) {
     return true;
   }
   if (tile == s.endH && (dir == s.right || dir == s.left)) {
@@ -274,7 +302,7 @@ function Move(p, dir) {
 function LeafPath(leaf) {
   var currentLeaf = leaf;
   var path = [];
-
+   if(currentLeaf.parent === null){return currentLeaf;}
   do {
     path.push(currentLeaf);
     currentLeaf = currentLeaf.parent;
@@ -368,6 +396,9 @@ function ParseLevel(lt) {
         case s.null:
           o.space++;
           break;
+       case s.null2:
+          o.space++;
+          break;
         default:
           break;
       }
@@ -380,22 +411,38 @@ function IsSame(p1, p2) {
   return (p1.x == p2.x && p1.y == p2.y);
 }
 
+function QuickFind(arr,pos){
+  for (var i = 0; i < arr.length; i++) {
+   if(IsSame(pos,arr[i].position)){
+    return arr[i];
+    }
+  }
+  return null;
+}
 
-function VisLeaf(leaf) {
+
+function MergeMap(leaf){
   var pos = LeafPath(leaf);
   var newMap = [];
   for (var i = 0; i < loadedLev.rows; i++) {
     newMap.push([]);
     for (var j = 0; j < loadedLev.columns; j++) {
-      var aa = $.grep(pos, function (cc) { return (cc.position.x == i && cc.position.y == j); });
-      if (aa.length > 0) {
-        aa = s.udirs[aa[0].direction];
+      //var aa = $.grep(pos, function (cc) { return (cc.position.x == i && cc.position.y == j); });
+      var aa = QuickFind(pos,{x:i,y:j});
+      if (aa !== null) {
+        aa = s.udirs[aa.direction];
       } else {
         aa = loadedLev.map[i][j];
       }
       newMap[i].push(aa);
     }
   }
+  return newMap;
+}
+
+
+function VisLeaf(leaf) {
+  var newMap = MergeMap(leaf);
   var str = "";
   for (var i = 0; i < loadedLev.rows; i++) {
     str += "\r\n";
@@ -456,4 +503,14 @@ function SanityValues() {
    if(InBounds(p2a,loadedLev.bounds)){  sanity.push({x:p2a.x,y:p2a.y,illegal:0})};
     if(InBounds(p2b,loadedLev.bounds)){ sanity.push({x:p2b.x,y:p2b.y,illegal:2})};
   }
+}
+
+function CanIStillGetBack(leaf) {
+  //really dumb ass flood fill
+  console.log(leaf.position, MergeMap(leaf));
+  var route = findShortestPath(leaf.position, MergeMap(leaf));
+  if (route === false) {
+    return false;
+  }
+  return true;
 }
